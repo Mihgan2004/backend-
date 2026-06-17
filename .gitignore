@@ -1,0 +1,12 @@
+node_modules
+.env
+.env.*
+!.env.example
+dist
+build
+.cache
+.medusa
+.DS_Store
+npm-debug.log
+yarn-error.log
+pnpm-debug.log
