@@ -6,7 +6,10 @@ import {
 } from "@medusajs/framework/utils"
 import { createShippingOptionsWorkflow } from "@medusajs/medusa/core-flows"
 
-const CDEK_PROVIDER_ID = "fp_cdek_cdek"
+// Workflow input uses "{identifier}_{configId}" (Medusa adds "fp_" prefix internally).
+const CDEK_PROVIDER_WORKFLOW_ID = "cdek_cdek"
+// Stored / API provider id after registration.
+const CDEK_PROVIDER_FULL_ID = "fp_cdek_cdek"
 
 export default async function cdekShippingSeed({
   container,
@@ -23,7 +26,7 @@ export default async function cdekShippingSeed({
   const { data: existingOptions } = await query.graph({
     entity: "shipping_option",
     fields: ["id", "name", "provider_id"],
-    filters: { provider_id: CDEK_PROVIDER_ID },
+    filters: { provider_id: CDEK_PROVIDER_FULL_ID },
   })
 
   if (existingOptions?.length) {
@@ -55,39 +58,59 @@ export default async function cdekShippingSeed({
     return
   }
 
-  const fulfillmentSet = await fulfillmentModuleService.createFulfillmentSets({
-    name: "CDEK Russia",
-    type: "shipping",
-    service_zones: [
-      {
-        name: "Russia",
-        geo_zones: [
-          {
-            country_code: "ru",
-            type: "country",
-          },
-        ],
+  const { data: existingSets } = await query.graph({
+    entity: "fulfillment_set",
+    fields: ["id", "name", "service_zones.id", "service_zones.name"],
+    filters: { name: "CDEK Russia" },
+  })
+
+  let serviceZoneId: string
+
+  const existingSet = existingSets?.[0] as
+    | {
+        id: string
+        service_zones?: Array<{ id: string }>
+      }
+    | undefined
+
+  if (existingSet?.service_zones?.[0]?.id) {
+    logger.info("Reusing existing CDEK Russia fulfillment set")
+    serviceZoneId = existingSet.service_zones[0].id
+  } else {
+    const fulfillmentSet = await fulfillmentModuleService.createFulfillmentSets({
+      name: "CDEK Russia",
+      type: "shipping",
+      service_zones: [
+        {
+          name: "Russia",
+          geo_zones: [
+            {
+              country_code: "ru",
+              type: "country",
+            },
+          ],
+        },
+      ],
+    })
+
+    await link.create({
+      [Modules.STOCK_LOCATION]: {
+        stock_location_id: stockLocation.id,
       },
-    ],
-  })
+      [Modules.FULFILLMENT]: {
+        fulfillment_set_id: fulfillmentSet.id,
+      },
+    })
 
-  await link.create({
-    [Modules.STOCK_LOCATION]: {
-      stock_location_id: stockLocation.id,
-    },
-    [Modules.FULFILLMENT]: {
-      fulfillment_set_id: fulfillmentSet.id,
-    },
-  })
-
-  const serviceZoneId = fulfillmentSet.service_zones[0].id
+    serviceZoneId = fulfillmentSet.service_zones[0].id
+  }
 
   await createShippingOptionsWorkflow(container).run({
     input: [
       {
         name: "СДЭК ПВЗ",
         price_type: "calculated",
-        provider_id: CDEK_PROVIDER_ID,
+        provider_id: CDEK_PROVIDER_WORKFLOW_ID,
         service_zone_id: serviceZoneId,
         shipping_profile_id: shippingProfile.id,
         data: {
@@ -114,7 +137,7 @@ export default async function cdekShippingSeed({
       {
         name: "СДЭК курьером",
         price_type: "calculated",
-        provider_id: CDEK_PROVIDER_ID,
+        provider_id: CDEK_PROVIDER_WORKFLOW_ID,
         service_zone_id: serviceZoneId,
         shipping_profile_id: shippingProfile.id,
         data: {
